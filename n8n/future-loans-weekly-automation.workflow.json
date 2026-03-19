@@ -1,0 +1,296 @@
+{
+  "name": "Future Loans Weekly Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Weekly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst day = now.getDay(); // Sun=0 .. Sat=6\nconst daysSinceSaturday = (day + 1) % 7;\nconst reportDateObj = new Date(now);\nreportDateObj.setDate(now.getDate() - daysSinceSaturday);\n\nconst dateTo = reportDateObj.toISOString().slice(0, 10);\nconst dateFromObj = new Date(reportDateObj);\ndateFromObj.setDate(reportDateObj.getDate() - 6);\nconst dateFrom = dateFromObj.toISOString().slice(0, 10);\n\nconst workspaceRoot = 'C:/Users/alexd/Documents/Websites/geo-seo-claude/geo-seo-claude';\nconst metricsDir = `${workspaceRoot}/data/metrics`;\nconst metricsCurrentPath = `${metricsDir}/metrics-current-${dateTo}.json`;\n\nreturn [{\n  siteUrl: 'sc-domain:futureloans.com',\n  domain: 'futureloans.com',\n  brandName: 'Future Loans',\n  reportDate: dateTo,\n  dateFrom,\n  dateTo,\n  workspaceRoot,\n  metricsDir,\n  metricsCurrentPath\n}];"
+      },
+      "id": "2",
+      "name": "Build Weekly Window",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://searchconsole.googleapis.com/webmasters/v3/sites/{{encodeURIComponent($json.siteUrl)}}/searchAnalytics/query",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"startDate\": $json.dateFrom,\n  \"endDate\": $json.dateTo,\n  \"dimensions\": [\"query\"],\n  \"rowLimit\": 25000\n}",
+        "options": {}
+      },
+      "id": "3",
+      "name": "GSC Queries",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://searchconsole.googleapis.com/webmasters/v3/sites/{{encodeURIComponent($json.siteUrl)}}/searchAnalytics/query",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"startDate\": $json.dateFrom,\n  \"endDate\": $json.dateTo,\n  \"dimensions\": [\"page\"],\n  \"rowLimit\": 25000\n}",
+        "options": {}
+      },
+      "id": "4",
+      "name": "GSC Pages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "position",
+        "options": {}
+      },
+      "id": "5",
+      "name": "Merge Queries + Pages",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        940,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const left = $input.first().json;\nconst right = $input.last().json;\n\nconst base = $('Build Weekly Window').first().json;\n\nconst queryRows = (left.rows || []).map((r) => ({\n  query: (r.keys && r.keys[0]) || '',\n  impressions: r.impressions || 0,\n  clicks: r.clicks || 0,\n  ctr: r.ctr || 0,\n  avg_position: r.position || 0\n}));\n\nconst pageRows = (right.rows || []).map((r) => ({\n  url: (r.keys && r.keys[0]) || '',\n  impressions: r.impressions || 0,\n  clicks: r.clicks || 0,\n  ctr: r.ctr || 0,\n  avg_position: r.position || 0\n}));\n\nreturn [{\n  ...base,\n  metricsCurrent: {\n    date: base.reportDate,\n    pages: pageRows,\n    queries: queryRows\n  }\n}];"
+      },
+      "id": "6",
+      "name": "Build Metrics JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path '{{ $json.metricsDir }}' | Out-Null; @'\\n{{ JSON.stringify($json.metricsCurrent, null, 2) }}\\n'@ | Set-Content -Path '{{ $json.metricsCurrentPath }}' -Encoding UTF8\""
+      },
+      "id": "7",
+      "name": "Write metrics-current.json",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1420,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=python \"{{ $json.workspaceRoot }}/scripts/run_weekly_automation.py\" --report-date \"{{ $json.reportDate }}\" --domain \"{{ $json.domain }}\" --brand-name \"{{ $json.brandName }}\" --metrics-current \"{{ $json.metricsCurrentPath }}\""
+      },
+      "id": "8",
+      "name": "Run Weekly Automation",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1660,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let parsed = {};\ntry {\n  parsed = JSON.parse($json.stdout || '{}');\n} catch (e) {\n  parsed = { parseError: String(e), raw: $json.stdout || '' };\n}\n\nconst base = $('Build Weekly Window').first().json;\n\nreturn [{\n  ...base,\n  workflowResult: parsed,\n  commandStderr: $json.stderr || '',\n  commandExitCode: $json.exitCode || 0\n}];"
+      },
+      "id": "9",
+      "name": "Parse Automation Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1900,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "subject": "=Future Loans Weekly Automation - {{ $json.reportDate }}",
+        "message": "=Weekly automation completed for {{ $json.reportDate }}\\n\\nResult:\\n{{ JSON.stringify($json.workflowResult, null, 2) }}\\n\\nstderr:\\n{{ $json.commandStderr }}",
+        "options": {}
+      },
+      "id": "10",
+      "name": "Send Email Summary",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2140,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "channel": "YOUR_SLACK_CHANNEL_ID",
+        "text": "=Future Loans weekly automation finished for {{ $json.reportDate }}\\n```{{ JSON.stringify($json.workflowResult, null, 2) }}```"
+      },
+      "id": "11",
+      "name": "Send Slack Summary",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        2140,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Weekly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Weekly Window",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Weekly Window": {
+      "main": [
+        [
+          {
+            "node": "GSC Queries",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "GSC Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSC Queries": {
+      "main": [
+        [
+          {
+            "node": "Merge Queries + Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GSC Pages": {
+      "main": [
+        [
+          {
+            "node": "Merge Queries + Pages",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Queries + Pages": {
+      "main": [
+        [
+          {
+            "node": "Build Metrics JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Metrics JSON": {
+      "main": [
+        [
+          {
+            "node": "Write metrics-current.json",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write metrics-current.json": {
+      "main": [
+        [
+          {
+            "node": "Run Weekly Automation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Weekly Automation": {
+      "main": [
+        [
+          {
+            "node": "Parse Automation Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Automation Output": {
+      "main": [
+        [
+          {
+            "node": "Send Email Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Slack Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "future-loans-weekly-automation-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "future-loans-weekly-automation"
+}
