@@ -221,3 +221,11 @@ Contributions welcome!
 ---
 
 Built for the AI search era.
+
+---
+## Future Loans Weekly SEO/GEO Agent
+
+This repo now also includes a weekly runner that productizes GEO signals into a single deliverable:
+`New keyword opportunities`, `Pages losing rank`, `Pages with low CTR`, and `AI visibility gaps`.
+
+See `FUTURE_LOANS_WEEKLY_AGENT.md` and run `scripts/future_loans_weekly_agent.py` (weekly-friendly for n8n).
